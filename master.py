@@ -2,7 +2,8 @@
 if __name__ == "__main__":
     from pybricks.iodevices import I2CDevice
     from pybricks.ev3devices import Motor
-    from pybricks.parameters import Port, Stop
+    from pybricks.parameters import Port, Stop, Direction
+    from pybricks.robotics import DriveBase
     import math
     from pybricks.messaging import BluetoothMailboxServer, TextMailbox
     import ujson
@@ -342,6 +343,39 @@ if __name__ == "__main__":
             return math.floor((((self.backward.angle() - self.forward.angle()) / 720 * self.circumference) + self.init_pos[1])/self.pos_scale_coefs[1])
         def get_pos(self) -> Vector2:
             return Vector2(self.get_x(),self.get_y())
+    
+    class DriveBaseWheels:
+        def __init__(self, forward_port: Port, backward_port: Port, left_port: Port, right_port: Port, init_pos: tuple[float, float], pos_scale_coefs: tuple[int, int] = (9, 12), use_gyro:Bool = False) -> None:
+            self.forward = Motor(forward_port, Direction.COUNTERCLOCKWISE)
+            self.backward = Motor(backward_port)
+            self.left = Motor(left_port, Direction.COUNTERCLOCKWISE)
+            self.right = Motor(right_port)
+            self.diameter = 50 #mm
+            self.axle_track = 150 # the distance between the wheels
+            self.circumference = math.pi * self.diameter
+            self.init_pos = init_pos
+            self.pos_scale_coefs = pos_scale_coefs
+            self.forwards_drive = DriveBase(self.left, self.right, wheeldiameter=self.diameter, axle_track = self.axle_track)
+            self.sideways_drive = DriveBase(self.forward, self.backward, wheeldiameter=self.diameter, axle_track = self.axle_track)
+            self.forwards_drive.use_gyro(use_gyro)
+            self.sideways_drive.use_gyro(use_gyro)
+        def drive(self, direction:int, distance:int) -> None:
+            vertical_mod = math.cos(direction)
+            horizontal_mod = math.sin(direction)
+            forwards_drive.straight(distance*vertical_mod,wait=False)
+            sideways_drive.straight(distance*horizontal_mod,wait=False)
+        def stop(self) -> None:
+            self.forward.stop()
+            self.backward.stop()
+            self.left.stop()
+            self.right.stop()
+        def get_x(self) -> int:
+            return math.floor((sideways_drive.distance() + self.init_pos[0])/self.pos_scale_coefs[0]) # get both for better accuracy
+        def get_y(self) -> int:
+            return math.floor((forwards_drive.distance() + self.init_pos[1])/self.pos_scale_coefs[1])
+        def get_pos(self) -> Vector2:
+            return Vector2(self.get_x(),self.get_y())
+
 
     class Bot:
 
