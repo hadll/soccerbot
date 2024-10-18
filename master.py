@@ -2,8 +2,8 @@
 if __name__ == "__main__":
     from pybricks.iodevices import I2CDevice
     from pybricks.ev3devices import Motor
-    from pybricks.parameters import Port, Stop, Direction
-    from pybricks.robotics import DriveBase
+    from pybricks.parameters import Port, Direction, Stop, Button
+    from pybricks.hubs import EV3Brick
     import math
     from pybricks.messaging import BluetoothMailboxServer, TextMailbox
     import ujson
@@ -101,21 +101,82 @@ if __name__ == "__main__":
             self.g = g
             self.e = e
             self.l = l
+            self.grid_bounds = [9,12]
+
+        # intended for class-private use only 
+        def _filter_possible_actions(self, state):
+
+            filtered_possible_actions = list()
+
+            for i in range(len(self.possible_actions)):
+
+                is_valid = True
+
+                for j in range(len(self.possible_actions[i])):
+
+                    if (self.possible_actions[i][j] in [1,2,3]) and state[i*4] >= self.grid_bounds[0]:
+
+                        is_valid = False
+                        break
+
+                    if (self.possible_actions[i][j] in [5,6,7]) and state[i*4] <= 0:
+
+                        is_valid = False
+                        break
+
+                    if (self.possible_actions[i][j] in [7,0,1]) and state[i*4 + 1] >= self.grid_bounds[1]:
+
+                        is_valid = False
+                        break
+
+                    if (self.possible_actions[i][j] in [3,4,5]) and state[i*4 + 1] <= 0:
+
+                        is_valid = False
+                        break
+
+                if is_valid:
+
+                    filtered_possible_actions.append(self.possible_actions[i])
+
+            return filtered_possible_actions
+        
+        def _get_state_action_pair_base_q_value(self, state, action):
+
+            base_q_value = 0
+
+            if self.connected:
+
+                # move towards ball
+                base_q_value += sum([0.1 if (False if (state[i*4 + 2] == 0) else action[i] == ((round((state[i*4 + 2]/12)*8)) % 8)) else -0.02 for i in range(2)])
+
+                for i in range(2):
+
+                    # kick ball towards goal
+                    if state[i*4 + 3] > 80 and action[i] == (round((state[i*4 + 2]/12)*8)) and action[i] in [7,0,1]:
+
+                        best_q_value += 0.2
+            
+            else:
+
+                # move towards ball
+                base_q_value +=  0.1 if (False if (state[2] == 0) else action[0] == ((round((state[2]/12)*8)) % 8)) else -0.1
+            
+            return base_q_value
 
         # intended for class-private use only 
         def _generate_starting_state_dict(self, state):
 
             if self.connected:
 
-                return {str(action): sum([0.1 if (False if (state[i*4 + 2] == 0) else action[i] == ((round((state[i*4 + 2]/12)*8)) % 8)) else -0.02 for i in range(2)]) for action in self.possible_actions}
+                return {str(action): \
+                sum([0.1 if (False if (state[i*4 + 2] == 0) else action[i] == ((round((state[i*4 + 2]/12)*8)) % 8)) \
+                else -0.02 for i in range(2)]) for action in self._filter_possible_actions(state)}
             
             else:
 
                 return {str(action): \
-                0.1 if (False if (state[2] == 0) \
-                else action[0] == \
-                ((round((state[2]/12)*8)) % 8)) \
-                else -0.1 for action in self.possible_actions}
+                0.1 if (False if (state[2] == 0) else action[0] == ((round((state[2]/12)*8)) % 8)) \
+                else -0.1 for action in self._filter_possible_actions(state)}
 
         # intended for class-private use only 
         # will select action based using epsilon greedy on dict representing the possible actions in the state and the Q-values of each possible action 
@@ -296,7 +357,7 @@ if __name__ == "__main__":
             self.sensor = I2CDevice(port, 0x08)
         def read(self):
             data = self.sensor.read(2,2)
-            return (((data[0] + 3)%12) or 12, data[1])
+            return (0 if data[0] == 0 else (((data[0] - 1)%12) or 12), data[1], data[0])
         def get_direction(self):
             data = self.read()
             return data[0]
@@ -305,10 +366,10 @@ if __name__ == "__main__":
             return data[1]
 
     class Wheels:
-        def __init__(self, forward_port: Port, backward_port: Port, left_port: Port, right_port: Port, init_pos: tuple[float, float], pos_scale_coefs: tuple[int, int] = (9, 12)) -> None:
-            self.forward = Motor(forward_port)
+        def __init__(self, forward_port: Port, backward_port: Port, left_port: Port, right_port: Port, init_pos: tuple[float, float], pos_scale_coefs: tuple[int, int] = (20, 29)) -> None:
+            self.forward = Motor(forward_port, Direction.COUNTERCLOCKWISE)
             self.backward = Motor(backward_port)
-            self.left = Motor(left_port)
+            self.left = Motor(left_port, Direction.COUNTERCLOCKWISE)
             self.right = Motor(right_port)
             self.diameter = 50 #mm
             self.circumference = math.pi * self.diameter
@@ -322,16 +383,10 @@ if __name__ == "__main__":
             vertical_mod = math.cos(direction)
             horizontal_mod = math.sin(direction)
             target_angle = distance/self.circumference*360
-            print(vertical_mod, target_angle)
-            print(abs(vertical_mod),target_angle*(vertical_mod**0))
-            self.forward.run_angle(abs(vertical_mod),math.copysign(target_angle,vertical_mod),Stop.HOLD,False)
-            self.backward.run_angle(abs(vertical_mod),-math.copysign(target_angle,vertical_mod),Stop.HOLD,False)
-            self.left.run_angle(abs(horizontal_mod),-math.copysign(target_angle,vertical_mod),Stop.HOLD,False)
-            self.right.run_angle(abs(horizontal_mod),math.copysign(target_angle,vertical_mod),Stop.HOLD,False)
-            # self.forward.run_angle(1,180,Stop.HOLD,False)
-            # self.backward.run_angle(1,-180,Stop.HOLD,False)
-            # self.left.run_angle(1,180,Stop.HOLD,False)
-            # self.right.run_angle(1,180,Stop.HOLD,False)
+            self.forward.run_angle(500,target_angle*horizontal_mod,Stop.HOLD,False)
+            self.backward.run_angle(500,target_angle*horizontal_mod,Stop.HOLD,False)
+            self.left.run_angle(500,target_angle*vertical_mod,Stop.HOLD,False)
+            self.right.run_angle(500,target_angle*vertical_mod,Stop.HOLD,False)
         def stop(self) -> None:
             self.forward.stop()
             self.backward.stop()
@@ -343,39 +398,49 @@ if __name__ == "__main__":
             return math.floor((((self.backward.angle() - self.forward.angle()) / 720 * self.circumference) + self.init_pos[1])/self.pos_scale_coefs[1])
         def get_pos(self) -> Vector2:
             return Vector2(self.get_x(),self.get_y())
-    
-    class DriveBaseWheels:
-        def __init__(self, forward_port: Port, backward_port: Port, left_port: Port, right_port: Port, init_pos: tuple[float, float], pos_scale_coefs: tuple[int, int] = (9, 12), use_gyro:Bool = False) -> None:
-            self.forward = Motor(forward_port, Direction.COUNTERCLOCKWISE)
-            self.backward = Motor(backward_port)
-            self.left = Motor(left_port, Direction.COUNTERCLOCKWISE)
-            self.right = Motor(right_port)
-            self.diameter = 50 #mm
-            self.axle_track = 150 # the distance between the wheels
-            self.circumference = math.pi * self.diameter
-            self.init_pos = init_pos
-            self.pos_scale_coefs = pos_scale_coefs
-            self.forwards_drive = DriveBase(self.left, self.right, wheeldiameter=self.diameter, axle_track = self.axle_track)
-            self.sideways_drive = DriveBase(self.forward, self.backward, wheeldiameter=self.diameter, axle_track = self.axle_track)
-            self.forwards_drive.use_gyro(use_gyro)
-            self.sideways_drive.use_gyro(use_gyro)
-        def drive(self, direction:int, distance:int) -> None:
-            vertical_mod = math.cos(direction)
-            horizontal_mod = math.sin(direction)
-            forwards_drive.straight(distance*vertical_mod,wait=False)
-            sideways_drive.straight(distance*horizontal_mod,wait=False)
-        def stop(self) -> None:
-            self.forward.stop()
-            self.backward.stop()
-            self.left.stop()
-            self.right.stop()
-        def get_x(self) -> int:
-            return math.floor((sideways_drive.distance() + self.init_pos[0])/self.pos_scale_coefs[0]) # get both for better accuracy
-        def get_y(self) -> int:
-            return math.floor((forwards_drive.distance() + self.init_pos[1])/self.pos_scale_coefs[1])
-        def get_pos(self) -> Vector2:
-            return Vector2(self.get_x(),self.get_y())
 
+    class InputManager:
+
+        def __init__(self, qLearning: QLearning, hub: EV3Brick, connected: bool):
+
+            self.qLearning = qLearning
+            self.hub = hub
+            self.connected = connected
+
+            self.in_play = False
+            self.is_master = False
+
+        def _is_btn_pressed(self, btn):
+
+            return btn in self.hub.buttons.pressed()
+
+        def input_tick(self, state_action_pairs: list):
+
+            if not self.in_play and self._is_btn_pressed(Button.CENTER):
+
+                self.is_master = not self.is_master
+
+            if self._is_btn_pressed(Button.UP):
+
+                self.in_play = True
+
+            elif self._is_btn_pressed(Button.Down):
+
+                self.in_play = False
+
+            elif not self.in_play and self._is_btn_pressed(Button.LEFT):
+
+                self.qLearning.update_q_values(state_action_pairs, -1*(self.connected or (not self.is_master)), True)
+
+                return list()
+
+            elif not self.in_play and self._is_btn_pressed(Button.RIGHT):
+
+                self.qLearning.update_q_values(state_action_pairs, 1*(self.connected or self.is_master), True)
+
+                return list()
+            
+            return state_action_pairs
 
     class Bot:
 
@@ -404,8 +469,11 @@ if __name__ == "__main__":
 
             self.qlearning_connected = QLearning([[i, j] for i in range(-1, 8) for j in range(-1, 8)], True)
             self.qlearning_disconnected = QLearning([[i] for i in range(-1, 8)], False)
-            self.ir = IRSeeker(Port.S1)
-            self.wheels = Wheels(Port.A, Port.D, Port.C, Port.B,(71.5, 60))
+            self.ir = IRSeeker(Port.S2)
+            self.wheels = Wheels(Port.A, Port.B, Port.C, Port.D,(71.5, 60))
+            self.hub = EV3Brick()
+            self.input_manager_connected = InputManager(self.qlearning_connected, self.hub, True)
+            self.input_manager_disconnected = InputManager(self.qlearning_disconnected, self.hub, False)
 
             if is_training:
 
@@ -430,8 +498,13 @@ if __name__ == "__main__":
                 x_coord = int(x_pos/self.MM_SCALE_COEF)
                 y_coord = int(y_pos/self.MM_SCALE_COEF)
 
-                ir_bearing = self.ir.get_direction()
-                ir_distance = int(self.ir.get_strength()/self.IR_SCALE_COEF)
+                ir_bearing, ir_distance, ir_bearing_raw = self.ir.read()
+
+                self.hub.screen.clear()
+                self.hub.screen.print("IR bearing: " + str(ir_bearing) + \
+                                      "\nRaw IR bearing: " + str(ir_bearing_raw) + \
+                                      "\nIR distance: " + str(ir_distance) + \
+                                      "\nMode:" + ("Master" if (self.input_manager_connected if self.connected else self.input_manager_disconnected).is_master else "Slave"))
 
                 action_self = -1
 
@@ -439,14 +512,24 @@ if __name__ == "__main__":
 
                 if self.connected:
 
+                    self.state_action_pairs = self.input_manager_connected.input_tick(self.state_action_pairs)
+
+                    if not self.input_manager_connected.in_play:
+
+                        continue
+
                     self.mbox.wait()
 
                     state_client = ""
 
-                    while state_client == "": # TODO: implement a max_iter on this loop
+                    i = 0
+
+                    while state_client == "" and i < 100:
                         
                             self.mbox.wait()
                             state_client = int(self.mbox.read())
+
+                            i+=1
 
                     state = state_self + state_client
 
@@ -464,6 +547,12 @@ if __name__ == "__main__":
 
                 else:
 
+                    self.state_action_pairs = self.input_manager_disconnected.input_tick(self.state_action_pairs)
+
+                    if not self.input_manager_disconnected.in_play:
+
+                        continue
+
                     action_self = self.qlearning_disconnected.get_action(state_self, False)[0]
 
                 if action_self == -1:
@@ -477,5 +566,5 @@ if __name__ == "__main__":
                     self.wheels.drive(move_dir, self.MM_SCALE_COEF)
 
 print("starting")
-bot = Bot(False, connected=False)
+bot = Bot(True, connected=False)
 bot.main_loop()
