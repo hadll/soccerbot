@@ -124,7 +124,9 @@ if __name__ == "__main__":
                         is_valid = False
                         break
 
-                    if (self.possible_actions[i][j] in [7,0,1]) and state[i*4 + 1] >= self.grid_bounds[1]:
+                    if (self.possible_actions[i][j] in [7,0,1]) \
+                        and state[i*4 + 1] >= \
+                            self.grid_bounds[1]:
 
                         is_valid = False
                         break
@@ -357,7 +359,7 @@ if __name__ == "__main__":
             self.sensor = I2CDevice(port, 0x08)
         def read(self):
             data = self.sensor.read(2,2)
-            return (0 if data[0] == 0 else (((data[0] - 1)%12) or 12), data[1], data[0])
+            return (0 if data[0] == 0 else (((data[0] - 2)%12) or 12), data[1], data[0])
         def get_direction(self):
             data = self.read()
             return data[0]
@@ -401,10 +403,13 @@ if __name__ == "__main__":
 
     class InputManager:
 
-        def __init__(self, qLearning: QLearning, hub: EV3Brick, connected: bool):
+        def __init__(self, qLearning: QLearning, wheels: Wheels, hub: EV3Brick, connected: bool):
 
             self.qLearning = qLearning
+            self.wheels = wheels
+
             self.hub = hub
+
             self.connected = connected
 
             self.in_play = False
@@ -419,6 +424,8 @@ if __name__ == "__main__":
             if not self.in_play and self._is_btn_pressed(Button.CENTER):
 
                 self.is_master = not self.is_master
+
+                self.wheels.init_pos = (91.5, 101.5) if self.is_master else (91.5, 60)
 
             if self._is_btn_pressed(Button.UP):
 
@@ -468,12 +475,12 @@ if __name__ == "__main__":
                 self.mbox = TextMailbox("communication", self.server)
 
             self.qlearning_connected = QLearning([[i, j] for i in range(-1, 8) for j in range(-1, 8)], True)
-            self.qlearning_disconnected = QLearning([[i] for i in range(-1, 8)], False)
+            self.qlearning_disconnected = QLearning([[i] for i in range(-1, 8)], False, open_from_file=True)
             self.ir = IRSeeker(Port.S2)
             self.wheels = Wheels(Port.A, Port.B, Port.C, Port.D,(71.5, 60))
             self.hub = EV3Brick()
-            self.input_manager_connected = InputManager(self.qlearning_connected, self.hub, True)
-            self.input_manager_disconnected = InputManager(self.qlearning_disconnected, self.hub, False)
+            self.input_manager_connected = InputManager(self.qlearning_connected, self.wheels, self.hub, True)
+            self.input_manager_disconnected = InputManager(self.qlearning_disconnected, self.wheels, self.hub, False)
 
             if is_training:
 
@@ -504,7 +511,7 @@ if __name__ == "__main__":
                 self.hub.screen.print("IR bearing: " + str(ir_bearing) + \
                                       "\nRaw IR bearing: " + str(ir_bearing_raw) + \
                                       "\nIR distance: " + str(ir_distance) + \
-                                      "\nMode:" + ("Master" if (self.input_manager_connected if self.connected else self.input_manager_disconnected).is_master else "Slave"))
+                                      "\nMode:" + ("Attacker" if (self.input_manager_connected if self.connected else self.input_manager_disconnected).is_master else "Defender"))
 
                 action_self = -1
 
